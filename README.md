@@ -2,9 +2,8 @@
 
 ![chat interface](./assets/chat_interface.png "Chat interface")
 
-A chatbot that allows to chat with youtube videos and local videos file. The image above shows examples of this bot on [this video]. 
+A chatbot that allows to chat with youtube videos and local videos file. The image above shows examples of this bot on [this video](https://www.youtube.com/watch?v=9RhWXPcKBI8). 
 
-(https://www.youtube.com/watch?v=9RhWXPcKBI8) 
 [![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/9RhWXPcKBI8/0.jpg)](https://www.youtube.com/watch?v=9RhWXPcKBI8)
 
 ## Objective
