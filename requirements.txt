@@ -1,0 +1,9 @@
+yt-dlp
+moviepy
+openai-whisper
+spacy
+sentence-transformers
+faiss-cpu
+opencv-python
+groq
+gradio
