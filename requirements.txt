@@ -6,4 +6,4 @@ sentence-transformers
 faiss-cpu
 opencv-python
 groq
-gradio
+gradio==4.37.2

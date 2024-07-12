@@ -20,6 +20,10 @@ from sentence_transformers import SentenceTransformer
 client = Groq()
 
 def download_video(url):
+    """ download youtube video by its url
+        Args:
+            url: youtube link
+    """
     # Configure yt-dlp options
     ydl_opts = {
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
@@ -51,6 +55,10 @@ def download_video(url):
         return filename
 
 def extract_audio(video_path):
+   """ Separate audio from video. If youtube, we can directly download the audio without video
+       Args:
+        video_path: path of video to extract audio 
+   """
    # Load the video file
    video = mp.VideoFileClip(video_path)
 
@@ -91,6 +99,12 @@ def transcribe_audio(audio_path):
    return transcription, transcript_with_timestamps
 
 def chunk_by_theme(transcript_with_timestamps):
+    """ Chunking the transcription by the theme
+        Args: 
+           transcript_with_timestamps: transcription with the timestamps 
+        Returns:
+            separated chunks ready for indexing  
+    """
     # Load spaCy model
     nlp = spacy.load("en_core_web_sm")
 
@@ -128,6 +142,14 @@ def chunk_by_theme(transcript_with_timestamps):
     return chunks
 
 def create_and_store_embeddings(text_chunks):
+    """ create embeddings from the chunks and store in the database
+        Args:
+            text_chunks: chunk of text
+        Return:
+            index: database (faiss)
+            embeddings: embeddings of chunks
+            text_chunks; the orginal text of chunks 
+    """
     # Initialize the sentence transformer model
     model = SentenceTransformer('all-MiniLM-L6-v2')
 
@@ -146,7 +168,33 @@ def create_and_store_embeddings(text_chunks):
 
     return index, embeddings, text_chunks
 
-def answer_question_core(question, history, index, embeddings, text_chunks, feed_all=True, text=None):
+def get_title(url):
+    """ get the title of youtube videos
+        Args: 
+            url: url of youtube video
+        Return:
+            Title of youtube videos.
+
+    """
+    with yt_dlp.YoutubeDL() as ydl:
+        info_dict = ydl.extract_info(url, download=False)
+        video_title = info_dict.get('title', None)
+        return video_title
+
+def answer_question_core(question, history, title, index, embeddings, text_chunks, feed_all=True, text=None):
+    """ answer the question of users given the video context
+        Args:
+            question: user's question
+            history: ignore for the moment, we needed it for chat interface of Gradio
+            title: title of video
+            index: database
+            embeddings: embeddings for the chunk text
+            text_chunks: original text of chunks 
+            feed_all: ignore chunking steps, feed all text to LLM, need large context
+            text: if feed_all is True, this text will be feeded to LLM, normally contains all transcriptions
+        Return: 
+            Answer of the question based on the context of video. 
+    """
     if feed_all:
         context = text
     else:
@@ -165,10 +213,11 @@ def answer_question_core(question, history, index, embeddings, text_chunks, feed
         most_relevant_chunk = [text_chunks[I[0][i]] for i in range(10)]
         context = "\n".join(f"{m['start']:.2f} - {m['end']:.2f}: {m['text']}" for m in most_relevant_chunk)
 
+    
     # Construct the prompt
     prompt = f"""Below is the context, which is transcription of a video with timestamps.
 
-Context: The title of the video is: 'Survive 100 Days Trapped, Win $500,000'
+Context: The title of the video is: {title}
 
 below is the relevant transcriptions (context) which are timestamps followed by the sentence:
 
@@ -199,29 +248,39 @@ Answer:"""
     # Extract the answer
     answer = chat_completion.choices[0].message.content
 
-    # Construct the result string
-    result = f"Question: {question}\n\n"
-    result += f"Relevant segment (from {most_relevant_chunk[0]['start']:.2f}s to {most_relevant_chunk[0]['end']:.2f}s):\n"
-    result += f"{most_relevant_chunk[0]['text']}\n\n"
-    result += f"Answer: {answer}"
-
-    return result
+    return answer
 
 def is_youtube_url(url):
+    """ Detect by using url if this is for a youtube video or a local path 
+    """
     parsed = urlparse(url)
     return 'youtube.com' in parsed.netloc or 'youtu.be' in parsed.netloc
 
 def save_cache(cache_data, cache_file):
+    """ save the cache do disk
+    """
     with open(cache_file, 'wb') as f:
         pickle.dump(cache_data, f)
 
 def load_cache(cache_file):
+    """ load cache from disk
+    """
     if os.path.exists(cache_file):
         with open(cache_file, 'rb') as f:
             return pickle.load(f)
     return {}
 
 def process_video(video_input, feed_all = False):
+    """ pipeline for the video processing before users could ask the questions about the video
+        Args:
+            video_input: path of video 
+            feed_all: ignore the chunking step or not
+        Return: 
+            index: database
+            embeddings: embeddings for the chunk text
+            text_chunks: original text of chunks 
+            text: if feed_all is True, this text will be feeded to LLM, normally contains all transcriptions
+    """
     cache_file = 'pipeline_cache.pkl'
     cache = load_cache(cache_file)
 
@@ -266,66 +325,10 @@ def process_video(video_input, feed_all = False):
         index, embeddings, text_chunks = cache['index'], cache['embeddings'], cache['text_chunks']
     else:
         index = embeddings = text_chunks = None
-    # Step 6: Extract frames (optional, if you need visual context)
-    # if 'frame_map' not in cache:
-    #     cache['frame_map'] = extract_frames(video_path)
-    #     save_cache(cache, cache_file)
-    # frame_map = cache['frame_map']
 
     text = "\n".join([f"{x['start']}-{x['end']}: {x['text']}" for x in transcript_with_timestamps]) if feed_all else None
 
     return index, embeddings, text_chunks, text
-
-# def answer_question_wrapper(index, embeddings, text_chunks, feed_all, text):
-
-    # # Main question-answering loop
-    # while True:
-    #     question = input("Ask a question about the video (or type 'quit' to exit): ")
-    #     # question = "what is the prize?"
-    #     if question.lower() == 'quit':
-    #         break
-
-    #     # Use Groq to answer the question
-    #     answer = answer_question(question, index, embeddings, text_chunks, feed_all, text)
-    #     print("\n" + answer + "\n")
-    #     # break
-
-    # Clean up: remove downloaded and temporary files
-    # if is_youtube_url(video_input):
-    #     os.remove(video_path)
-    # os.remove(audio_path)
-    # os.remove(cache_file)
-
-# video_input = input("Enter the path to a video file or a YouTube URL: ")
-# video_input = "https://www.youtube.com/watch?v=9RhWXPcKBI8"
-# process_video_and_answer_questions(video_input, feed_all=False)
-
-# def load_chatbot_interface(video_url):
-#     index, embeddings, text_chunks, text = process_video(video_url)
-    
-#     answer_question = partial(answer_question_core, 
-#                           index = index,
-#                           embeddings = embeddings, 
-#                           text_chunks=text_chunks, 
-#                           feed_all=False, 
-#                           text = text)
- 
-#     def answer_question(question):
-#         # Use the processed video and the user's question to generate an answer
-#         # For now, let's just return a placeholder answer
-#         return f"I'm sorry, I can't answer questions about the video at '{video_url}' yet."
-
-#     gr.ChatInterface(answer_question).launch()
-
-# # Define the initial Gradio interface
-# iface = gr.Interface(
-#     fn=load_chatbot_interface,  # function to call when the user submits the video URL
-#     inputs=gr.inputs.Textbox(lines=1, label="Video URL"),  # input field for the video URL
-#     outputs="text",  # the function returns a text string (the video URL)
-# )
-
-# # Launch the initial interface
-# iface.launch()
 
 # Create the parser
 parser = argparse.ArgumentParser(description="Process a URL/path.")
@@ -336,15 +339,20 @@ parser.add_argument('Path', metavar='path', type=str, help='the path to process'
 # Parse the command-line arguments
 args = parser.parse_args()
 
-# You can now use args.path where you need the value the user entered
 print("Video's url/path to process:", args.Path)
 index, embeddings, text_chunks, text = process_video(args.Path)
-print("processing video is done!")
+title = get_title(args.Path)
+print(f"processing video '{title}' is done!")
     
-answer_question = partial(answer_question_core, 
+def answer_question(message, history):
+    """ Create a wrapper for the gradio's function. 
+        Functools' Partial does not work with gradio.
+    """
+    return answer_question_core(message, history, 
+                        title = title, 
                         index = index,
                         embeddings = embeddings, 
                         text_chunks=text_chunks, 
                         feed_all=False, 
                         text = text)
-gr.ChatInterface(answer_question).launch()
+gr.ChatInterface(answer_question).launch(share=True)
